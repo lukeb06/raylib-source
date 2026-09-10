@@ -10,6 +10,6 @@ struct PlayerStatePacket {
     PacketType type = PacketType::PlayerState;
     uint32_t networkID;
     float posX, posY, posZ;
-    float velX, velY, velZ;
+    float yaw;
 };
 #pragma pack(pop)

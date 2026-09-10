@@ -17,6 +17,42 @@ BoundingBox GetEntityAABB(const TransformComponent &transform,
                 transform.z + halfD}};
 }
 
+BoundingBox GetEntityRenderBox(const TransformComponent &transform,
+                               const BasicRenderComponent &collider) {
+    float halfW = collider.width * 0.5f;
+    float halfD = collider.depth * 0.5f;
+    return BoundingBox{
+        Vector3{transform.x - halfW, transform.y, transform.z - halfD},
+        Vector3{transform.x + halfW, transform.y + collider.height,
+                transform.z + halfD}};
+}
+
+Entity SpawnRemotePlayer(Registry &registry, uint32_t networkID, float x,
+                         float y, float z, float yaw) {
+    Entity remotePlayer = registry.CreateEntity();
+    registry.AddComponent<TransformComponent>(remotePlayer, {x, y, z});
+    registry.AddComponent<VelocityComponent>(remotePlayer, {0.0f, 0.0f, 0.0f});
+    registry.AddComponent<ColliderComponent>(remotePlayer,
+                                             {0.8f, 1.8f, 0.8f, false});
+    // registry.AddComponent<BasicRenderComponent>(
+    //     remotePlayer, {0.8f, 1.8f, 0.8f, RED, MAROON});
+
+    Model model = LoadModel("resources/sponge.glb");
+
+    registry.AddComponent<ModelRenderComponent>(remotePlayer, {model});
+
+    // Wire up NetworkSyncComponent with networkID tracking
+    NetworkSyncComponent sync;
+    sync.networkId = networkID;
+    sync.targetX = x;
+    sync.targetY = y;
+    sync.targetZ = z;
+    sync.targetYaw = yaw - 90.0f;
+    registry.AddComponent<NetworkSyncComponent>(remotePlayer, sync);
+
+    return remotePlayer;
+}
+
 void InputSystem::Update(Registry &registry) {
     auto pool = registry.View<InputComponent>();
     for (auto &[entity, input] : pool->data) {
@@ -259,31 +295,61 @@ void CameraSystem::Update(Registry &registry) {
             BeginMode3D(raylibCamera);
             DrawGrid(400, 1.0f);
 
-            auto colliders = registry.View<ColliderComponent>();
+            auto models = registry.View<ModelRenderComponent>();
+            for (auto &[e, model] : models->data) {
+                auto t = registry.GetComponent<TransformComponent>(e);
+                if (!t)
+                    continue;
+
+                float yaw = -90.0f;
+
+                auto NetworkSyncComp =
+                    registry.GetComponent<NetworkSyncComponent>(e);
+                if (NetworkSyncComp) {
+                    yaw = NetworkSyncComp->targetYaw;
+                }
+
+                DrawModelEx(model.model, Vector3{t->x, t->y, t->z},
+                            Vector3{0.0f, 1.0f, 0.0f}, -yaw,
+                            Vector3{0.25f, 0.25f, 0.25f}, WHITE);
+            }
+
+            auto colliders = registry.View<BasicRenderComponent>();
             for (auto &[e, col] : colliders->data) {
                 auto t = registry.GetComponent<TransformComponent>(e);
                 if (!t)
                     continue;
 
-                BoundingBox box = GetEntityAABB(*t, col);
+                Color fillColor = col.color;
+                Color wireColor = col.wireColor;
+
+                BoundingBox box = GetEntityRenderBox(*t, col);
                 Vector3 size = Vector3Subtract(box.max, box.min);
                 Vector3 center = Vector3Add(box.min, Vector3Scale(size, 0.5f));
 
-                if (col.isStatic) {
-                    Color fillColor = GRAY;
-                    Color wireColor = DARKGRAY;
-                    if (auto colorComp =
-                            registry.GetComponent<ColorComponent>(e)) {
-                        fillColor = colorComp->color;
-                        wireColor = colorComp->wireColor;
-                    }
+                DrawCube(center, size.x, size.y, size.z, fillColor);
+                DrawCubeWires(center, size.x, size.y, size.z, wireColor);
 
-                    DrawCube(center, size.x, size.y, size.z, fillColor);
-                    DrawCubeWires(center, size.x, size.y, size.z, wireColor);
-                } else if (e != entity) {
-                    DrawCube(center, size.x, size.y, size.z, RED);
-                    DrawCubeWires(center, size.x, size.y, size.z, MAROON);
-                }
+                // BoundingBox box = GetEntityAABB(*t, col);
+                // Vector3 size = Vector3Subtract(box.max, box.min);
+                // Vector3 center = Vector3Add(box.min, Vector3Scale(size,
+                // 0.5f));
+
+                // if (col.isStatic) {
+                //     Color fillColor = GRAY;
+                //     Color wireColor = DARKGRAY;
+                //     if (auto colorComp =
+                //             registry.GetComponent<ColorComponent>(e)) {
+                //         fillColor = colorComp->color;
+                //         wireColor = colorComp->wireColor;
+                //     }
+
+                //     DrawCube(center, size.x, size.y, size.z, fillColor);
+                //     DrawCubeWires(center, size.x, size.y, size.z, wireColor);
+                // } else if (e != entity) {
+                //     DrawCube(center, size.x, size.y, size.z, RED);
+                //     DrawCubeWires(center, size.x, size.y, size.z, MAROON);
+                // }
             }
             EndMode3D();
         }
@@ -291,6 +357,8 @@ void CameraSystem::Update(Registry &registry) {
 }
 
 void NetworkSystem::Update(Registry &registry, float deltaTime) {
+    SteamAPI_RunCallbacks();
+
     SteamManager::Get().Update();
 
     auto pSockets = SteamManager::Get().GetSockets();
@@ -311,6 +379,7 @@ void NetworkSystem::Update(Registry &registry, float deltaTime) {
         auto transform = registry.GetComponent<TransformComponent>(entity);
         if (transform) {
             transform->x += (net.targetX - transform->x) * 5.0f * deltaTime;
+            transform->y += (net.targetY - transform->y) * 5.0f * deltaTime;
             transform->z += (net.targetZ - transform->z) * 5.0f * deltaTime;
         }
     }
@@ -318,20 +387,50 @@ void NetworkSystem::Update(Registry &registry, float deltaTime) {
 
 void NetworkSystem::SendLocalTransform(Registry &registry,
                                        ISteamNetworkingSockets *pSockets) {
+
     auto transforms = registry.View<TransformComponent>();
     for (auto &[entity, transform] : transforms->data) {
         if (registry.HasComponent<LocalPlayerTag>(entity)) {
             PlayerStatePacket packet;
-            packet.networkID = static_cast<uint32_t>(entity);
+            packet.type = PacketType::PlayerState;
+
+            // Use SteamID for globally unique network IDs so host/client entity
+            // IDs don't collide
+            packet.networkID = static_cast<uint32_t>(
+                SteamUser()->GetSteamID().ConvertToUint64());
             packet.posX = transform.x;
             packet.posY = transform.y;
             packet.posZ = transform.z;
+            packet.yaw = -90.0f;
 
-            HSteamNetConnection conn = SteamManager::Get().GetConnection();
-            if (conn != k_HSteamNetConnection_Invalid) {
-                pSockets->SendMessageToConnection(
-                    conn, &packet, sizeof(packet),
-                    k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
+            auto camera = registry.GetComponent<CameraComponent>(entity);
+            if (camera) {
+                packet.yaw = camera->yaw;
+            }
+
+            if (SteamManager::Get().IsHost()) {
+                // HOST: Send local transform to ALL connected clients
+                for (HSteamNetConnection clientConn :
+                     SteamManager::Get().GetClientConnections()) {
+                    pSockets->SendMessageToConnection(
+                        clientConn, &packet, sizeof(packet),
+                        k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
+                }
+            } else {
+                // CLIENT: Send local transform to Host connection
+                HSteamNetConnection hostConn =
+                    SteamManager::Get().GetConnection();
+                if (hostConn != k_HSteamNetConnection_Invalid) {
+                    EResult result = pSockets->SendMessageToConnection(
+                        hostConn, &packet, sizeof(packet),
+                        k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
+
+                    if (result != k_EResultOK) {
+                        std::cout << "[Net Send Error] Failed to send packet. "
+                                     "EResult code: "
+                                  << result << std::endl;
+                    }
+                }
             }
             break;
         }
@@ -345,16 +444,46 @@ void NetworkSystem::PollIncomingPackets(Registry &registry) {
 
     ISteamNetworkingMessage *pIncomingMsgs[16];
 
-    auto processConnection = [&](HSteamNetConnection conn) {
+    // Helper lambda to process messages on a specific handle
+    auto processMessagesOnHandle = [&](HSteamNetConnection conn,
+                                       const char *label) {
         int numMsgs =
             pSockets->ReceiveMessagesOnConnection(conn, pIncomingMsgs, 16);
+
+        if (numMsgs < 0) {
+            std::cout << "[Net Error] Invalid connection handle passed to "
+                         "ReceiveMessages: "
+                      << conn << std::endl;
+            return;
+        }
+
         for (int i = 0; i < numMsgs; ++i) {
             ISteamNetworkingMessage *pMsg = pIncomingMsgs[i];
 
             if (pMsg->m_cbSize == sizeof(PlayerStatePacket)) {
                 PlayerStatePacket *packet =
                     reinterpret_cast<PlayerStatePacket *>(pMsg->m_pData);
+
                 ApplyRemotePlayerState(registry, *packet);
+
+                // If Host, relay to all other clients
+                if (SteamManager::Get().IsHost()) {
+                    for (HSteamNetConnection clientConn :
+                         SteamManager::Get().GetClientConnections()) {
+                        if (clientConn != conn) {
+                            pSockets->SendMessageToConnection(
+                                clientConn, packet, sizeof(PlayerStatePacket),
+                                k_nSteamNetworkingSend_UnreliableNoNagle,
+                                nullptr);
+                        }
+                    }
+                }
+            } else {
+                std::cout << "[Net Warning] Packet size mismatch! Received "
+                          << pMsg->m_cbSize
+                          << " bytes, but PlayerStatePacket struct expects "
+                          << sizeof(PlayerStatePacket) << " bytes."
+                          << std::endl;
             }
 
             pMsg->Release();
@@ -362,16 +491,14 @@ void NetworkSystem::PollIncomingPackets(Registry &registry) {
     };
 
     if (SteamManager::Get().IsHost()) {
-        // Read packets from all connected clients
-        for (HSteamNetConnection clientConn :
-             SteamManager::Get().GetClientConnections()) {
-            processConnection(clientConn);
+        const auto &clients = SteamManager::Get().GetClientConnections();
+        for (HSteamNetConnection clientConn : clients) {
+            processMessagesOnHandle(clientConn, "Host Client Poll");
         }
     } else {
-        // Client reads packets from host connection
         HSteamNetConnection hostConn = SteamManager::Get().GetConnection();
         if (hostConn != k_HSteamNetConnection_Invalid) {
-            processConnection(hostConn);
+            processMessagesOnHandle(hostConn, "Client Host Poll");
         }
     }
 }
@@ -379,12 +506,25 @@ void NetworkSystem::PollIncomingPackets(Registry &registry) {
 void NetworkSystem::ApplyRemotePlayerState(Registry &registry,
                                            const PlayerStatePacket &packet) {
     auto netPool = registry.View<NetworkSyncComponent>();
+    bool foundEntity = false;
+
     for (auto &[entity, net] : netPool->data) {
-        if (!registry.HasComponent<LocalPlayerTag>(entity)) {
-            // Update the interpolation targets from the incoming packet
+        // Find existing remote player matching this networkID
+        if (net.networkId == packet.networkID) {
             net.targetX = packet.posX;
+            net.targetY = packet.posY;
             net.targetZ = packet.posZ;
-            return;
+            net.targetYaw = packet.yaw - 90.0f;
+
+            foundEntity = true;
+            break;
         }
+    }
+
+    // Spawn a new ECS remote player entity if we haven't seen this networkID
+    // yet
+    if (!foundEntity) {
+        SpawnRemotePlayer(registry, packet.networkID, packet.posX, packet.posY,
+                          packet.posZ, packet.yaw);
     }
 }

@@ -14,7 +14,8 @@ Entity CreateBlock(Registry &reg, Vector3 pos, Vector3 size, Color color = GRAY,
     Entity block = reg.CreateEntity();
     reg.AddComponent<TransformComponent>(block, {pos.x, pos.y, pos.z});
     reg.AddComponent<ColliderComponent>(block, {size.x, size.y, size.z, true});
-    reg.AddComponent<ColorComponent>(block, {color, wireColor});
+    reg.AddComponent<BasicRenderComponent>(
+        block, {size.x, size.y, size.z, color, wireColor});
     return block;
 }
 
@@ -47,11 +48,11 @@ int main(int argc, char *argv[]) {
 
     // 3. Auto-host own lobby if not joining another player
     if (!joiningHostFromLaunch) {
-        SteamManager::Get().HostLobby();
+        SteamManager::Get().HostLobby(0);
     }
 
-    const int screenWidth = 1920;
-    const int screenHeight = 1080;
+    const int screenWidth = 1280;
+    const int screenHeight = 720;
 
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(screenWidth, screenHeight, "Raylib Source");

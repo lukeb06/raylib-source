@@ -21,6 +21,18 @@ struct ColliderComponent {
     bool isStatic = false;
 };
 
+struct BasicRenderComponent {
+    float width = 0.8f;
+    float height = 1.8f;
+    float depth = 0.8f;
+    Color color = GRAY;
+    Color wireColor = DARKGRAY;
+};
+
+struct ModelRenderComponent {
+    Model model;
+};
+
 struct PlayerInfoComponent {
     std::string name;
     int health = 100;
@@ -44,10 +56,5 @@ struct CameraComponent {
 
 struct NetworkSyncComponent {
     uint32_t networkId = 0;
-    float targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f;
-};
-
-struct ColorComponent {
-    Color color = GRAY;
-    Color wireColor = DARKGRAY;
+    float targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f, targetYaw = -90.0f;
 };
