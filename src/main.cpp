@@ -1,4 +1,5 @@
 #include "Components/Components.hpp"
+#include "Maps/Maps.hpp"
 #include "Registry/Registry.hpp"
 #include "SteamManager/SteamManager.hpp"
 #include "Systems/Systems.hpp"
@@ -8,16 +9,6 @@
 #include <cmath>
 #include <iostream>
 #include <string>
-
-Entity CreateBlock(Registry &reg, Vector3 pos, Vector3 size, Color color = GRAY,
-                   Color wireColor = DARKGRAY) {
-    Entity block = reg.CreateEntity();
-    reg.AddComponent<TransformComponent>(block, {pos.x, pos.y, pos.z});
-    reg.AddComponent<ColliderComponent>(block, {size.x, size.y, size.z, true});
-    reg.AddComponent<BasicRenderComponent>(
-        block, {size.x, size.y, size.z, color, wireColor});
-    return block;
-}
 
 int main(int argc, char *argv[]) {
     // 1. Initialize Steamworks API
@@ -72,40 +63,7 @@ int main(int argc, char *argv[]) {
     registry.AddComponent<InputComponent>(localPlayer);
     registry.AddComponent<CameraComponent>(localPlayer);
 
-    CreateBlock(registry, {0.0f, -1.0f, 0.0f}, {400.0f, 1.0f, 400.0f},
-                RAYWHITE);
-
-    CreateBlock(registry, {0.0f, 0.0f, -5.0f}, {4.0f, 0.4f, 4.0f});
-
-    CreateBlock(registry, {5.0f, 0.0f, -5.0f}, {4.0f, 1.0f, 4.0f});
-
-    CreateBlock(registry, {-6.0f, 0.0f, -2.0f}, {1.0f, 3.0f, 8.0f});
-
-    for (int i = 0; i < 100; i++) {
-        CreateBlock(registry, {0.0f, 0.0f + i * 0.4f, 5.0f + i * 0.4f},
-                    {4.0f, 0.4f, 0.4f}, LIME);
-    }
-
-    CreateBlock(registry, {0.0f, 0.0f + 99 * 0.4f, 5.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-
-    CreateBlock(registry, {4.0f, 0.0f + 99 * 0.4f, 5.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-    CreateBlock(registry, {-4.0f, 0.0f + 99 * 0.4f, 5.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-
-    CreateBlock(registry, {4.0f, 0.0f + 99 * 0.4f, 1.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-    CreateBlock(registry, {-4.0f, 0.0f + 99 * 0.4f, 1.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-
-    CreateBlock(registry, {4.0f, 0.0f + 99 * 0.4f, -3.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-    CreateBlock(registry, {-4.0f, 0.0f + 99 * 0.4f, -3.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
-
-    CreateBlock(registry, {0.0f, 0.0f + 99 * 0.4f, -3.0f + 99 * 0.4f + 2.2f},
-                {4.0f, 0.4f, 4.0f});
+    Maps::LoadMap2(registry);
 
     InputSystem inputSystem;
     MovementSystem movementSystem;
