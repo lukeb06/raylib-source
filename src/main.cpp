@@ -1,10 +1,13 @@
 #include "Components/Components.hpp"
 #include "Registry/Registry.hpp"
+#include "SteamManager/SteamManager.hpp"
 #include "Systems/Systems.hpp"
 #include "raylib.h"
+#include "steam/steam_api.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <string>
 
 Entity CreateBlock(Registry &reg, Vector3 pos, Vector3 size, Color color = GRAY,
                    Color wireColor = DARKGRAY) {
@@ -15,7 +18,38 @@ Entity CreateBlock(Registry &reg, Vector3 pos, Vector3 size, Color color = GRAY,
     return block;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    // 1. Initialize Steamworks API
+    if (!SteamAPI_Init()) {
+        std::cerr << "[Steam] Error: Steam must be running to play!"
+                  << std::endl;
+        return 1;
+    }
+
+    // 2. Check for +connect <SteamID64> in launch arguments (if launched
+    // directly from invite)
+    bool joiningHostFromLaunch = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "+connect" && i + 1 < argc) {
+            try {
+                uint64_t hostSteamID64 = std::stoull(argv[i + 1]);
+                SteamManager::Get().ConnectToUser(CSteamID(hostSteamID64));
+                joiningHostFromLaunch = true;
+                std::cout << "[Steam] Joining host session from launch args: "
+                          << hostSteamID64 << std::endl;
+            } catch (...) {
+                std::cerr << "[Steam] Failed to parse +connect launch argument."
+                          << std::endl;
+            }
+            break;
+        }
+    }
+
+    // 3. Auto-host own lobby if not joining another player
+    if (!joiningHostFromLaunch) {
+        SteamManager::Get().HostLobby();
+    }
+
     const int screenWidth = 1920;
     const int screenHeight = 1080;
 
@@ -86,6 +120,8 @@ int main() {
 
         inputSystem.Update(registry);
         movementSystem.Update(registry, deltaTime);
+
+        // NetworkSystem::Update pumps SteamCallbacks & handles packet sync
         networkSystem.Update(registry, deltaTime);
 
         int key = GetKeyPressed();
@@ -173,5 +209,10 @@ int main() {
     }
 
     CloseWindow();
+
+    // 4. Clean shutdown of Steam API & sockets
+    SteamManager::Get().Shutdown();
+    SteamAPI_Shutdown();
+
     return 0;
 }

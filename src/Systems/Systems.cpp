@@ -1,5 +1,6 @@
 #include "Systems.hpp"
 #include "../Components/Components.hpp"
+#include "../SteamManager/SteamManager.hpp"
 #include "raylib.h"
 #include "raymath.h"
 #include <algorithm>
@@ -290,8 +291,19 @@ void CameraSystem::Update(Registry &registry) {
 }
 
 void NetworkSystem::Update(Registry &registry, float deltaTime) {
-    auto netPool = registry.View<NetworkSyncComponent>();
+    SteamManager::Get().Update();
 
+    auto pSockets = SteamManager::Get().GetSockets();
+    if (pSockets) {
+        // 1. Broadcast local player position
+        SendLocalTransform(registry, pSockets);
+
+        // 2. Read incoming network packets and update target positions
+        PollIncomingPackets(registry);
+    }
+
+    // 3. Smoothly interpolate remote entities toward their target position
+    auto netPool = registry.View<NetworkSyncComponent>();
     for (auto &[entity, net] : netPool->data) {
         if (registry.HasComponent<LocalPlayerTag>(entity))
             continue;
@@ -300,6 +312,79 @@ void NetworkSystem::Update(Registry &registry, float deltaTime) {
         if (transform) {
             transform->x += (net.targetX - transform->x) * 5.0f * deltaTime;
             transform->z += (net.targetZ - transform->z) * 5.0f * deltaTime;
+        }
+    }
+}
+
+void NetworkSystem::SendLocalTransform(Registry &registry,
+                                       ISteamNetworkingSockets *pSockets) {
+    auto transforms = registry.View<TransformComponent>();
+    for (auto &[entity, transform] : transforms->data) {
+        if (registry.HasComponent<LocalPlayerTag>(entity)) {
+            PlayerStatePacket packet;
+            packet.networkID = static_cast<uint32_t>(entity);
+            packet.posX = transform.x;
+            packet.posY = transform.y;
+            packet.posZ = transform.z;
+
+            HSteamNetConnection conn = SteamManager::Get().GetConnection();
+            if (conn != k_HSteamNetConnection_Invalid) {
+                pSockets->SendMessageToConnection(
+                    conn, &packet, sizeof(packet),
+                    k_nSteamNetworkingSend_UnreliableNoNagle, nullptr);
+            }
+            break;
+        }
+    }
+}
+
+void NetworkSystem::PollIncomingPackets(Registry &registry) {
+    auto pSockets = SteamManager::Get().GetSockets();
+    if (!pSockets)
+        return;
+
+    ISteamNetworkingMessage *pIncomingMsgs[16];
+
+    auto processConnection = [&](HSteamNetConnection conn) {
+        int numMsgs =
+            pSockets->ReceiveMessagesOnConnection(conn, pIncomingMsgs, 16);
+        for (int i = 0; i < numMsgs; ++i) {
+            ISteamNetworkingMessage *pMsg = pIncomingMsgs[i];
+
+            if (pMsg->m_cbSize == sizeof(PlayerStatePacket)) {
+                PlayerStatePacket *packet =
+                    reinterpret_cast<PlayerStatePacket *>(pMsg->m_pData);
+                ApplyRemotePlayerState(registry, *packet);
+            }
+
+            pMsg->Release();
+        }
+    };
+
+    if (SteamManager::Get().IsHost()) {
+        // Read packets from all connected clients
+        for (HSteamNetConnection clientConn :
+             SteamManager::Get().GetClientConnections()) {
+            processConnection(clientConn);
+        }
+    } else {
+        // Client reads packets from host connection
+        HSteamNetConnection hostConn = SteamManager::Get().GetConnection();
+        if (hostConn != k_HSteamNetConnection_Invalid) {
+            processConnection(hostConn);
+        }
+    }
+}
+
+void NetworkSystem::ApplyRemotePlayerState(Registry &registry,
+                                           const PlayerStatePacket &packet) {
+    auto netPool = registry.View<NetworkSyncComponent>();
+    for (auto &[entity, net] : netPool->data) {
+        if (!registry.HasComponent<LocalPlayerTag>(entity)) {
+            // Update the interpolation targets from the incoming packet
+            net.targetX = packet.posX;
+            net.targetZ = packet.posZ;
+            return;
         }
     }
 }
