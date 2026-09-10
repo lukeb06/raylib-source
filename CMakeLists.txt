@@ -13,9 +13,16 @@ FetchContent_Declare(
     GIT_TAG        6.0
 )
 
+FetchContent_Declare(
+    steamworks
+    GIT_REPOSITORY https://github.com/rlabrecque/SteamworksSDK
+    GIT_TAG "df2baabf574a738ef1ea90a7e89339107fc0a279"
+)
+
 set(BUILD_EXAMPLES OFF CACHE INTERNAL "")
 
 FetchContent_MakeAvailable(raylib)
+FetchContent_MakeAvailable(steamworks)
 
 file(GLOB_RECURSE SRC_FILES
     "src/*.cpp"

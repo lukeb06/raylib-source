@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 Entity CreateBlock(Registry &reg, Vector3 pos, Vector3 size, Color color = GRAY,
                    Color wireColor = DARKGRAY) {
@@ -15,8 +16,13 @@ Entity CreateBlock(Registry &reg, Vector3 pos, Vector3 size, Color color = GRAY,
 }
 
 int main() {
-    InitWindow(1280, 720, "Raylib Source");
-    SetTargetFPS(60);
+    const int screenWidth = 1920;
+    const int screenHeight = 1080;
+
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+    InitWindow(screenWidth, screenHeight, "Raylib Source");
+
+    // SetTargetFPS(240);
     DisableCursor();
 
     Registry registry;
@@ -31,7 +37,8 @@ int main() {
     registry.AddComponent<InputComponent>(localPlayer);
     registry.AddComponent<CameraComponent>(localPlayer);
 
-    CreateBlock(registry, {0.0f, -1.0f, 0.0f}, {40.0f, 1.0f, 40.0f}, RAYWHITE);
+    CreateBlock(registry, {0.0f, -1.0f, 0.0f}, {400.0f, 1.0f, 400.0f},
+                RAYWHITE);
 
     CreateBlock(registry, {0.0f, 0.0f, -5.0f}, {4.0f, 0.4f, 4.0f});
 
@@ -70,6 +77,10 @@ int main() {
     CameraSystem cameraSystem;
     NetworkSystem networkSystem;
 
+    SetExitKey(KEY_NULL);
+
+    bool gamePaused = false;
+
     while (!WindowShouldClose()) {
         float deltaTime = GetFrameTime();
 
@@ -77,70 +88,87 @@ int main() {
         movementSystem.Update(registry, deltaTime);
         networkSystem.Update(registry, deltaTime);
 
-        BeginDrawing();
-        ClearBackground(SKYBLUE);
+        int key = GetKeyPressed();
 
-        cameraSystem.Update(registry);
+        if (key == KEY_ESCAPE) {
+            gamePaused = !gamePaused;
+            std::cout << "Pressed escape, new state: " << gamePaused
+                      << std::endl;
 
-        DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 3.0f, DARKGRAY);
-
-        DrawText("Raylib Source", 10, 10, 20, DARKGRAY);
-        DrawFPS(10, 40);
-
-        int screenWidth = GetScreenWidth();
-        int screenHeight = GetScreenHeight();
-
-        auto transforms = registry.View<TransformComponent>();
-        for (auto &[entity, transform] : transforms->data) {
-            if (registry.HasComponent<CameraComponent>(entity)) {
-                if (auto vel =
-                        registry.GetComponent<VelocityComponent>(entity)) {
-                    float speed2D = sqrtf(vel->x * vel->x + vel->z * vel->z);
-
-                    const char *speedText = TextFormat("%.1f u/s", speed2D);
-                    int fontSize = 28;
-                    int textWidth = MeasureText(speedText, fontSize);
-
-                    int posX = (screenWidth - textWidth) / 2;
-                    int posY = screenHeight - 55;
-
-                    Color speedColor = LIME;
-                    if (speed2D < 0.1f) {
-                        speedColor = LIGHTGRAY;
-                    } else if (speed2D <= 8.0f) {
-                        float t = speed2D / 8.0f;
-                        speedColor = ColorAlphaBlend(
-                            RAYWHITE, LIME,
-                            ColorFromNormalized((Vector4){t, t, t, 1.0f}));
-                    } else if (speed2D <= 16.0f) {
-                        float t = (speed2D - 8.0f) / 8.0f;
-                        speedColor =
-                            (Color){(unsigned char)(255 * t), 255, 0, 255};
-                    } else {
-                        speedColor = ORANGE;
-                        if (speed2D > 22.0f)
-                            speedColor = RED;
-                    }
-
-                    DrawText(speedText, posX + 2, posY + 2, fontSize,
-                             (Color){0, 0, 0, 180});
-                    DrawText(speedText, posX, posY, fontSize, speedColor);
-
-                    int barWidth = 200;
-                    int barHeight = 4;
-                    int barX = (screenWidth - barWidth) / 2;
-                    int barY = posY + fontSize + 4;
-
-                    DrawRectangle(barX, barY, barWidth, barHeight,
-                                  (Color){40, 40, 40, 150});
-                    float fillPercent = std::min(speed2D / 24.0f, 1.0f);
-                    DrawRectangle(barX, barY, (int)(barWidth * fillPercent),
-                                  barHeight, speedColor);
-                }
-                break;
+            if (gamePaused) {
+                EnableCursor(); // Unlocks mouse and shows it
+            } else {
+                DisableCursor(); // Locks mouse to center and hides it
             }
         }
 
+        BeginDrawing();
+        if (!gamePaused) {
+            ClearBackground(SKYBLUE);
+
+            cameraSystem.Update(registry);
+
+            DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 3.0f,
+                       DARKGRAY);
+
+            DrawText("Raylib Source", 10, 10, 20, DARKGRAY);
+            DrawFPS(10, 40);
+
+            int screenWidth = GetScreenWidth();
+            int screenHeight = GetScreenHeight();
+
+            auto transforms = registry.View<TransformComponent>();
+            for (auto &[entity, transform] : transforms->data) {
+                if (registry.HasComponent<CameraComponent>(entity)) {
+                    if (auto vel =
+                            registry.GetComponent<VelocityComponent>(entity)) {
+                        float speed2D =
+                            sqrtf(vel->x * vel->x + vel->z * vel->z);
+
+                        const char *speedText = TextFormat("%.1f u/s", speed2D);
+                        int fontSize = 28;
+                        int textWidth = MeasureText(speedText, fontSize);
+
+                        int posX = (screenWidth - textWidth) / 2;
+                        int posY = screenHeight - 55;
+
+                        Color speedColor = LIME;
+                        if (speed2D < 0.1f) {
+                            speedColor = LIGHTGRAY;
+                        } else if (speed2D <= 8.0f) {
+                            float t = speed2D / 8.0f;
+                            speedColor = ColorAlphaBlend(
+                                RAYWHITE, LIME,
+                                ColorFromNormalized(Vector4{t, t, t, 1.0f}));
+                        } else if (speed2D <= 16.0f) {
+                            float t = (speed2D - 8.0f) / 8.0f;
+                            speedColor =
+                                Color{(unsigned char)(255 * t), 255, 0, 255};
+                        } else {
+                            speedColor = ORANGE;
+                            if (speed2D > 22.0f)
+                                speedColor = RED;
+                        }
+
+                        DrawText(speedText, posX + 2, posY + 2, fontSize,
+                                 Color{0, 0, 0, 180});
+                        DrawText(speedText, posX, posY, fontSize, speedColor);
+
+                        int barWidth = 200;
+                        int barHeight = 4;
+                        int barX = (screenWidth - barWidth) / 2;
+                        int barY = posY + fontSize + 4;
+
+                        DrawRectangle(barX, barY, barWidth, barHeight,
+                                      Color{40, 40, 40, 150});
+                        float fillPercent = std::min(speed2D / 24.0f, 1.0f);
+                        DrawRectangle(barX, barY, (int)(barWidth * fillPercent),
+                                      barHeight, speedColor);
+                    }
+                    break;
+                }
+            }
+        }
         EndDrawing();
     }
 

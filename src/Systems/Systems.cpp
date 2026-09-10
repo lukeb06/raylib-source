@@ -251,12 +251,12 @@ void CameraSystem::Update(Registry &registry) {
             Camera3D raylibCamera = {0};
             raylibCamera.position = eyePos;
             raylibCamera.target = target;
-            raylibCamera.up = (Vector3){0.0f, 1.0f, 0.0f};
+            raylibCamera.up = Vector3{0.0f, 1.0f, 0.0f};
             raylibCamera.fovy = cameraComp.fov;
             raylibCamera.projection = CAMERA_PERSPECTIVE;
 
             BeginMode3D(raylibCamera);
-            DrawGrid(40, 1.0f);
+            DrawGrid(400, 1.0f);
 
             auto colliders = registry.View<ColliderComponent>();
             for (auto &[e, col] : colliders->data) {
