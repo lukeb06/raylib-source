@@ -1,5 +1,6 @@
 #include "Systems.hpp"
 #include "../Components/Components.hpp"
+#include "../Maps/Maps.hpp"
 #include "../SteamManager/SteamManager.hpp"
 #include "raylib.h"
 #include "raymath.h"
@@ -10,28 +11,27 @@
 BoundingBox GetEntityAABB(const TransformComponent &transform,
                           const ColliderComponent &collider) {
     float halfW = collider.width * 0.5f;
+    float halfH = collider.height * 0.5f;
     float halfD = collider.depth * 0.5f;
     return BoundingBox{
-        Vector3{transform.x - halfW, transform.y, transform.z - halfD},
-        Vector3{transform.x + halfW, transform.y + collider.height,
-                transform.z + halfD}};
+        Vector3{transform.x - halfW, transform.y - halfH, transform.z - halfD},
+        Vector3{transform.x + halfW, transform.y + halfH, transform.z + halfD}};
 }
 
 BoundingBox GetEntityRenderBox(const TransformComponent &transform,
                                const BasicRenderComponent &collider) {
     float halfW = collider.width * 0.5f;
+    float halfH = collider.height * 0.5f;
     float halfD = collider.depth * 0.5f;
     return BoundingBox{
-        Vector3{transform.x - halfW, transform.y, transform.z - halfD},
-        Vector3{transform.x + halfW, transform.y + collider.height,
-                transform.z + halfD}};
+        Vector3{transform.x - halfW, transform.y - halfH, transform.z - halfD},
+        Vector3{transform.x + halfW, transform.y + halfH, transform.z + halfD}};
 }
 
 Entity SpawnRemotePlayer(Registry &registry, uint32_t networkID, float x,
                          float y, float z, float yaw) {
     Entity remotePlayer = registry.CreateEntity();
     registry.AddComponent<TransformComponent>(remotePlayer, {x, y, z});
-    registry.AddComponent<VelocityComponent>(remotePlayer, {0.0f, 0.0f, 0.0f});
     registry.AddComponent<ColliderComponent>(remotePlayer,
                                              {0.8f, 1.8f, 0.8f, false});
     // registry.AddComponent<BasicRenderComponent>(
@@ -68,6 +68,19 @@ void InputSystem::Update(Registry &registry) {
         if (IsKeyDown(KEY_D))
             input.moveX += 1.0f;
 
+        if (IsKeyDown(KEY_R)) {
+            auto transform = registry.GetComponent<TransformComponent>(entity);
+            transform->x = 0.0f;
+            transform->y = 0.0f;
+            transform->z = 0.0f;
+
+            auto velocity = registry.GetComponent<VelocityComponent>(entity);
+            velocity->x = 0.0f;
+            velocity->y = 0.0f;
+            velocity->z = 0.0f;
+            velocity->isGrounded = true;
+        }
+
         input.jumpRequested = IsKeyDown(KEY_SPACE);
 
         Vector2 mouseDelta = GetMouseDelta();
@@ -86,7 +99,7 @@ void MovementSystem::Update(Registry &registry, float deltaTime) {
 
     const float AIR_ACCEL = 100.0f;
     const float AIR_CAP = 1.2f;
-    const float MAX_STEP_HEIGHT = 0.5f;
+    const float MAX_STEP_HEIGHT = 0.75f;
 
     struct StaticObstacle {
         Entity id;
@@ -194,8 +207,8 @@ void MovementSystem::Update(Registry &registry, float deltaTime) {
         };
 
         auto TryStepUp = [&](float oldY) {
-            if (!vel->isGrounded)
-                return false;
+            // if (!vel->isGrounded)
+            //     return false;
 
             const int STEP_STEPS = 16;
             const float STEP_INC = MAX_STEP_HEIGHT / (float)STEP_STEPS;
@@ -293,7 +306,7 @@ void CameraSystem::Update(Registry &registry) {
             raylibCamera.projection = CAMERA_PERSPECTIVE;
 
             BeginMode3D(raylibCamera);
-            DrawGrid(400, 1.0f);
+            // DrawGrid(400, 1.0f);
 
             auto models = registry.View<ModelRenderComponent>();
             for (auto &[e, model] : models->data) {
@@ -460,7 +473,200 @@ void NetworkSystem::PollIncomingPackets(Registry &registry) {
         for (int i = 0; i < numMsgs; ++i) {
             ISteamNetworkingMessage *pMsg = pIncomingMsgs[i];
 
-            if (pMsg->m_cbSize == sizeof(PlayerStatePacket)) {
+            // Safety check for empty messages
+            if (pMsg->m_cbSize < sizeof(PacketType)) {
+                pMsg->Release();
+                continue;
+            }
+
+            // Peek at the first element to determine the Packet Type
+            PacketType incomingType =
+                *reinterpret_cast<PacketType *>(pMsg->m_pData);
+
+            // ==========================================
+            // CASE 1: RECEIVED MAP REQUEST -> SEND MAP DATA
+            // ==========================================
+            if (pMsg->m_cbSize == sizeof(MapRequestPacket) &&
+                incomingType == PacketType::MapRequest) {
+                std::cout << "[Net] Sending map data to client " << conn
+                          << std::endl;
+
+                // 1. Serialize the dynamic map data into a temporary byte
+                // buffer
+                std::vector<uint8_t> send_buffer;
+
+                // Write Header Type
+                PacketType t = PacketType::Map;
+                send_buffer.insert(
+                    send_buffer.end(), reinterpret_cast<uint8_t *>(&t),
+                    reinterpret_cast<uint8_t *>(&t) + sizeof(PacketType));
+
+                // Write Format String (Length prefix + characters)
+                uint32_t format_len =
+                    static_cast<uint32_t>(Maps::loadedMapData.format.size());
+                send_buffer.insert(send_buffer.end(),
+                                   reinterpret_cast<uint8_t *>(&format_len),
+                                   reinterpret_cast<uint8_t *>(&format_len) +
+                                       sizeof(format_len));
+                if (format_len > 0) {
+                    send_buffer.insert(send_buffer.end(),
+                                       Maps::loadedMapData.format.begin(),
+                                       Maps::loadedMapData.format.end());
+                }
+
+                // Write Version
+                send_buffer.insert(
+                    send_buffer.end(),
+                    reinterpret_cast<uint8_t *>(&Maps::loadedMapData.version),
+                    reinterpret_cast<uint8_t *>(&Maps::loadedMapData.version) +
+                        sizeof(int));
+
+                // Write Total Blocks Count
+                uint32_t total_blocks =
+                    static_cast<uint32_t>(Maps::loadedMapData.blocks.size());
+                send_buffer.insert(send_buffer.end(),
+                                   reinterpret_cast<uint8_t *>(&total_blocks),
+                                   reinterpret_cast<uint8_t *>(&total_blocks) +
+                                       sizeof(total_blocks));
+
+                // Write every individual block struct
+                for (const auto &block : Maps::loadedMapData.blocks) {
+                    // id
+                    send_buffer.insert(
+                        send_buffer.end(),
+                        reinterpret_cast<const uint8_t *>(&block.id),
+                        reinterpret_cast<const uint8_t *>(&block.id) +
+                            sizeof(int));
+
+                    // name string inside block
+                    uint32_t name_len =
+                        static_cast<uint32_t>(block.name.size());
+                    send_buffer.insert(send_buffer.end(),
+                                       reinterpret_cast<uint8_t *>(&name_len),
+                                       reinterpret_cast<uint8_t *>(&name_len) +
+                                           sizeof(name_len));
+                    if (name_len > 0) {
+                        send_buffer.insert(send_buffer.end(),
+                                           block.name.begin(),
+                                           block.name.end());
+                    }
+
+                    // Blitting pure metrics data fields (Vector3s and Colors)
+                    send_buffer.insert(
+                        send_buffer.end(),
+                        reinterpret_cast<const uint8_t *>(&block.pos),
+                        reinterpret_cast<const uint8_t *>(&block.pos) +
+                            sizeof(Vector3));
+                    send_buffer.insert(
+                        send_buffer.end(),
+                        reinterpret_cast<const uint8_t *>(&block.size),
+                        reinterpret_cast<const uint8_t *>(&block.size) +
+                            sizeof(Vector3));
+                    send_buffer.insert(
+                        send_buffer.end(),
+                        reinterpret_cast<const uint8_t *>(&block.color),
+                        reinterpret_cast<const uint8_t *>(&block.color) +
+                            sizeof(Color));
+                    send_buffer.insert(
+                        send_buffer.end(),
+                        reinterpret_cast<const uint8_t *>(&block.wireColor),
+                        reinterpret_cast<const uint8_t *>(&block.wireColor) +
+                            sizeof(Color));
+                }
+
+                // 2. Send out using RELIABLE flag so no packet streams get
+                // fragmented/lost
+                pSockets->SendMessageToConnection(
+                    conn, send_buffer.data(), send_buffer.size(),
+                    k_nSteamNetworkingSend_Reliable, nullptr);
+            }
+
+            // ==========================================
+            // CASE 2: RECEIVED FULL MAP PACKET -> DESERIALIZE
+            // ==========================================
+            else if (incomingType == PacketType::Map) {
+                std::cout << "[Net] Received map data from client " << conn
+                          << std::endl;
+
+                uint8_t *raw_bytes = reinterpret_cast<uint8_t *>(pMsg->m_pData);
+                size_t offset = 0;
+
+                // Skip past the PacketType token
+                offset += sizeof(PacketType);
+
+                MapData mapData;
+
+                // Read Format String
+                uint32_t format_len = 0;
+                std::memcpy(&format_len, &raw_bytes[offset],
+                            sizeof(format_len));
+                offset += sizeof(format_len);
+                if (format_len > 0) {
+                    mapData.format = std::string(
+                        reinterpret_cast<char *>(&raw_bytes[offset]),
+                        format_len);
+                    offset += format_len;
+                }
+
+                // Read Version
+                std::memcpy(&mapData.version, &raw_bytes[offset], sizeof(int));
+                offset += sizeof(int);
+
+                // Read Blocks Vector Array
+                uint32_t total_blocks = 0;
+                std::memcpy(&total_blocks, &raw_bytes[offset],
+                            sizeof(total_blocks));
+                offset += sizeof(total_blocks);
+                mapData.blocks.resize(total_blocks);
+
+                for (uint32_t b_idx = 0; b_idx < total_blocks; ++b_idx) {
+                    Block b;
+
+                    // id
+                    std::memcpy(&b.id, &raw_bytes[offset], sizeof(int));
+                    offset += sizeof(int);
+
+                    // name string
+                    uint32_t name_len = 0;
+                    std::memcpy(&name_len, &raw_bytes[offset],
+                                sizeof(name_len));
+                    offset += sizeof(name_len);
+                    if (name_len > 0) {
+                        b.name = std::string(
+                            reinterpret_cast<char *>(&raw_bytes[offset]),
+                            name_len);
+                        offset += name_len;
+                    }
+
+                    // Vector3/Color structs
+                    std::memcpy(&b.pos, &raw_bytes[offset], sizeof(Vector3));
+                    offset += sizeof(Vector3);
+                    std::memcpy(&b.size, &raw_bytes[offset], sizeof(Vector3));
+                    offset += sizeof(Vector3);
+                    std::memcpy(&b.color, &raw_bytes[offset], sizeof(Color));
+                    offset += sizeof(Color);
+                    std::memcpy(&b.wireColor, &raw_bytes[offset],
+                                sizeof(Color));
+                    offset += sizeof(Color);
+
+                    mapData.blocks[b_idx] = b;
+                }
+
+                std::cout << "[Net] Loading map data from packet" << std::endl;
+                int loadCode = Maps::LoadMapFromMapData(registry, mapData);
+
+                if (loadCode != 0) {
+                    std::cout << "[Net Error] Failed to load map data from "
+                                 "packet. Error code: "
+                              << loadCode << std::endl;
+                }
+            }
+
+            // ==========================================
+            // CASE 3: STANDARD PLAYER STATE PACKET
+            // ==========================================
+            else if (pMsg->m_cbSize == sizeof(PlayerStatePacket) &&
+                     incomingType == PacketType::PlayerState) {
                 PlayerStatePacket *packet =
                     reinterpret_cast<PlayerStatePacket *>(pMsg->m_pData);
 
@@ -478,12 +684,6 @@ void NetworkSystem::PollIncomingPackets(Registry &registry) {
                         }
                     }
                 }
-            } else {
-                std::cout << "[Net Warning] Packet size mismatch! Received "
-                          << pMsg->m_cbSize
-                          << " bytes, but PlayerStatePacket struct expects "
-                          << sizeof(PlayerStatePacket) << " bytes."
-                          << std::endl;
             }
 
             pMsg->Release();

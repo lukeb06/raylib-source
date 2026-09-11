@@ -7,7 +7,7 @@ project(raylibgame CXX)
 
 include(FetchContent)
 
-# --- Fetch Raylib ---
+# --- Fetch Dependencies ---
 FetchContent_Declare(
     raylib
     GIT_REPOSITORY https://github.com/raysan5/raylib
@@ -15,15 +15,20 @@ FetchContent_Declare(
 )
 set(BUILD_EXAMPLES OFF CACHE INTERNAL "")
 
-# --- Fetch Steamworks SDK (Steamworks.NET layout) ---
 FetchContent_Declare(
     steamworks
     GIT_REPOSITORY https://github.com/rlabrecque/SteamworksSDK
     GIT_TAG        df2baabf574a738ef1ea90a7e89339107fc0a279
 )
 
-# Populate dependencies
-FetchContent_MakeAvailable(raylib steamworks)
+# Added nlohmann/json dependency
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json
+    GIT_TAG v3.12.0
+)
+
+FetchContent_MakeAvailable(raylib steamworks json)
 
 # --- Source Files ---
 file(GLOB_RECURSE SRC_FILES
@@ -35,8 +40,7 @@ file(GLOB_RECURSE SRC_FILES
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
 
-# --- Steamworks Include Path ---
-# In this repo layout, headers live in source/sdk/public
+# --- Include Directories ---
 target_include_directories(${PROJECT_NAME} PRIVATE 
     "${steamworks_SOURCE_DIR}/public"
 )
@@ -57,7 +61,6 @@ if(WIN32)
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     )
 elseif(APPLE)
-    # Correct path for macOS in rlabrecque/SteamworksSDK
     set(STEAM_LIB_PATH "${steamworks_SOURCE_DIR}/redistributable_bin/osx/libsteam_api.dylib")
 
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -85,9 +88,11 @@ elseif(UNIX)
     )
 endif()
 
-# --- Link Libraries ---
+# --- Link Executable Libraries ---
+# Note: Added nlohmann_json::nlohmann_json to the link list
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     raylib
+    nlohmann_json::nlohmann_json
     "${STEAM_LIB_PATH}"
 )
 

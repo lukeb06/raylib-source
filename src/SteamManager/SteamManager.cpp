@@ -1,4 +1,5 @@
 #include "SteamManager.hpp"
+#include "../NetworkPackets/NetworkPackets.hpp"
 #include <string>
 
 // Runs per-frame in your game loop or network system
@@ -74,6 +75,22 @@ void SteamManager::OnConnectionStatusChanged(
     if (pInfo->m_info.m_eState == k_ESteamNetworkingConnectionState_Connected) {
         std::cout << "[Steam] Connection established with peer handle: "
                   << pInfo->m_hConn << std::endl;
+
+        if (!SteamManager::Get().IsHost()) {
+            // Send request to host
+            MapRequestPacket reqPacket;
+
+            EResult result = m_pSockets->SendMessageToConnection(
+                SteamManager::Get().GetConnection(), &reqPacket,
+                sizeof(reqPacket), k_nSteamNetworkingSend_UnreliableNoNagle,
+                nullptr);
+
+            if (result != k_EResultOK) {
+                std::cout << "[Net Error] Failed to send packet. "
+                             "EResult code: "
+                          << result << std::endl;
+            }
+        }
     }
 
     if (pInfo->m_info.m_eState ==

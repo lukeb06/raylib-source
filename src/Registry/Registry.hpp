@@ -36,6 +36,8 @@ class Registry {
     Registry() = default;
 
     Entity CreateEntity();
+    Entity CreateLocalPlayer();
+    void Clear();
 
     template <typename T> T &AddComponent(Entity entity, T component = T{}) {
         auto pool = GetPool<T>();

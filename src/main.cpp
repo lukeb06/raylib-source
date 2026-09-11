@@ -11,15 +11,29 @@
 #include <string>
 
 int main(int argc, char *argv[]) {
-    // 1. Initialize Steamworks API
+
+    const int screenWidth = 1280;
+    const int screenHeight = 720;
+
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+    InitWindow(screenWidth, screenHeight, "Spongebob BHOP");
+
+    // SetTargetFPS(240);
+    DisableCursor();
+
+    Registry registry;
+
+    Entity localPlayer = registry.CreateLocalPlayer();
+
     if (!SteamAPI_Init()) {
         std::cerr << "[Steam] Error: Steam must be running to play!"
                   << std::endl;
         return 1;
     }
 
-    // 2. Check for +connect <SteamID64> in launch arguments (if launched
-    // directly from invite)
+    SteamNetworkingUtils()->InitRelayNetworkAccess();
+    SteamNetworking()->AllowP2PPacketRelay(true);
+
     bool joiningHostFromLaunch = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "+connect" && i + 1 < argc) {
@@ -42,28 +56,12 @@ int main(int argc, char *argv[]) {
         SteamManager::Get().HostLobby(0);
     }
 
-    const int screenWidth = 1280;
-    const int screenHeight = 720;
+    // Maps::LoadMap4(registry);
+    int loadCode = Maps::LoadGameMap(registry);
 
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-    InitWindow(screenWidth, screenHeight, "Raylib Source");
-
-    // SetTargetFPS(240);
-    DisableCursor();
-
-    Registry registry;
-
-    Entity localPlayer = registry.CreateEntity();
-    registry.AddComponent<TransformComponent>(localPlayer, {0.0f, 0.0f, 0.0f});
-    registry.AddComponent<VelocityComponent>(localPlayer);
-    registry.AddComponent<ColliderComponent>(localPlayer,
-                                             {0.8f, 1.8f, 0.8f, false});
-    registry.AddComponent<PlayerInfoComponent>(localPlayer, {"LocalHero"});
-    registry.AddComponent<LocalPlayerTag>(localPlayer);
-    registry.AddComponent<InputComponent>(localPlayer);
-    registry.AddComponent<CameraComponent>(localPlayer);
-
-    Maps::LoadMap2(registry);
+    if (loadCode != 0) {
+        return 1;
+    }
 
     InputSystem inputSystem;
     MovementSystem movementSystem;
@@ -106,7 +104,7 @@ int main(int argc, char *argv[]) {
             DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 3.0f,
                        DARKGRAY);
 
-            DrawText("Raylib Source", 10, 10, 20, DARKGRAY);
+            DrawText("Spongebob BHOP", 10, 10, 20, DARKGRAY);
             DrawFPS(10, 40);
 
             int screenWidth = GetScreenWidth();
@@ -164,6 +162,62 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+
+        // --- Draw 2D HUD / Pause Menu (Pure Raylib) ---
+        if (gamePaused) {
+            // 1. Semi-transparent dark overlay over the 3D scene
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(),
+                          Color{0, 0, 0, 150});
+
+            // 2. Center Pause Card Box
+            int boxWidth = 350;
+            int boxHeight = 300;
+            int boxX = (GetScreenWidth() - boxWidth) / 2;
+            int boxY = (GetScreenHeight() - boxHeight) / 2;
+
+            DrawRectangle(boxX, boxY, boxWidth, boxHeight, RAYWHITE);
+            DrawRectangleLines(boxX, boxY, boxWidth, boxHeight, DARKGRAY);
+
+            // Header Text
+            DrawText("PAUSED",
+                     boxX + (boxWidth - MeasureText("PAUSED", 30)) / 2,
+                     boxY + 25, 30, DARKGRAY);
+
+            // 3. Interactive Resume Button
+            Rectangle resumeBtn = {(float)boxX + 50, (float)boxY + 90,
+                                   (float)boxWidth - 100, 45.0f};
+            Vector2 mousePos = GetMousePosition();
+            bool hoverResume = CheckCollisionPointRec(mousePos, resumeBtn);
+
+            DrawRectangleRec(resumeBtn, hoverResume ? LIGHTGRAY : GRAY);
+            DrawRectangleLinesEx(resumeBtn, 2, DARKGRAY);
+            DrawText("Resume Game",
+                     (int)resumeBtn.x +
+                         (resumeBtn.width - MeasureText("Resume Game", 20)) / 2,
+                     (int)resumeBtn.y + 12, 20, hoverResume ? BLACK : WHITE);
+
+            if (hoverResume && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                gamePaused = false;
+                DisableCursor();
+            }
+
+            // 4. Interactive Quit Button
+            Rectangle quitBtn = {(float)boxX + 50, (float)boxY + 160,
+                                 (float)boxWidth - 100, 45.0f};
+            bool hoverQuit = CheckCollisionPointRec(mousePos, quitBtn);
+
+            DrawRectangleRec(quitBtn, hoverQuit ? RED : MAROON);
+            DrawRectangleLinesEx(quitBtn, 2, DARKGRAY);
+            DrawText("Quit",
+                     (int)quitBtn.x +
+                         (quitBtn.width - MeasureText("Quit", 20)) / 2,
+                     (int)quitBtn.y + 12, 20, RAYWHITE);
+
+            if (hoverQuit && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                CloseWindow();
+            }
+        }
+
         EndDrawing();
     }
 
